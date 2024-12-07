@@ -2,18 +2,23 @@ import os
 import requests
 import yt_dlp
 import aiohttp
+import asyncio
+from pathlib import Path
 
 # Configuration
 FLIC_TOKEN = "flic_da5a13caa14f0cc5c124532ef942f8c9986907e3ed6fe4778cdd1ecf74aec22c"  # Replace with your Flic-Token
-CATEGORY_ID = 25 # Replace with the appropriate category ID
-VIDEO_URL = "https://www.instagram.com/p/C41wjYCyvUj/"  # Replace with your Instagram/TikTok URL
-VIDEO_PATH = "video.mp4"  # The local path where the video will be saved
+CATEGORY_ID = 25  # Replace with the appropriate category ID
+VIDEO_PATH = Path("./videos")  # Directory to monitor for new .mp4 files
+VIDEO_URLS = ["https://www.instagram.com/reel/C-w2tYiuMLi/"]  # Add Instagram/TikTok URLs here
+
+# Ensure the videos directory exists
+VIDEO_PATH.mkdir(parents=True, exist_ok=True)
 
 # Function to download video from Instagram/TikTok
 def download_video(url, output_path):
     ydl_opts = {
         'format': 'bestvideo+bestaudio/best',
-        'outtmpl': output_path,
+        'outtmpl': str(output_path),
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -52,7 +57,7 @@ def create_post(title, hash_value):
         "Content-Type": "application/json"
     }
     data = {
-        "title":"Mindset_is_everything",
+        "title":"POWER",
         "hash": hash_value,
         "is_available_in_public_feed": True,
         "category_id": CATEGORY_ID
@@ -71,13 +76,28 @@ def delete_local_video(video_path):
     except Exception as e:
         print(f"Error deleting file: {e}")
 
-# Main function to handle video processing
-async def handle_video(video_url):
-    # Step 1: Download video
-    print(f"Downloading video from {video_url}...")
-    download_video(video_url, VIDEO_PATH)
+# Function to monitor the videos directory for new files
+async def monitor_videos_directory():
+    print(f"Monitoring {VIDEO_PATH} for new .mp4 files...")
+    processed_files = set()
+    while True:
+        for file in VIDEO_PATH.glob("*.mp4"):
+            if file.name not in processed_files:
+                print(f"Processing new video: {file.name}")
+                processed_files.add(file.name)
+                await process_video(file)
+        await asyncio.sleep(5)  # Check every 5 seconds
 
-    # Step 2: Get upload URL
+# Function to handle video download and processing
+async def handle_video_download(video_url):
+    video_file_path = VIDEO_PATH / f"{os.path.basename(video_url)}.mp4"
+    print(f"Downloading video from {video_url}...")
+    download_video(video_url, video_file_path)
+    print(f"Downloaded video to {video_file_path}")
+
+# Function to handle video processing
+async def process_video(video_file):
+    # Step 1: Get upload URL
     response = get_upload_url()
     if response is None or 'url' not in response:
         print("Upload URL missing in the response.")
@@ -86,18 +106,29 @@ async def handle_video(video_url):
     upload_url = response['url']
     video_hash = response['hash']
 
-    # Step 3: Upload video
-    upload_success = await upload_video(upload_url, VIDEO_PATH)
+    # Step 2: Upload video
+    upload_success = await upload_video(upload_url, video_file)
 
     if upload_success:
-        # Step 4: Create post
-        video_title = os.path.basename(video_url)
+        # Step 3: Create post
+        video_title = video_file.stem
         create_post(video_title, video_hash)
 
-        # Step 5: Delete local video after upload
-        delete_local_video(VIDEO_PATH)
+        # Step 4: Delete local video after upload
+        delete_local_video(video_file)
 
-# Run the video processing
+# Main function to start the process
+async def main():
+    # Start monitoring directory for new videos
+    monitor_task = asyncio.create_task(monitor_videos_directory())
+
+    # Download videos from specified URLs
+    for url in VIDEO_URLS:
+        await handle_video_download(url)
+
+    # Keep the program running for monitoring
+    await monitor_task
+
+# Run the program
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(handle_video(VIDEO_URL))
+    asyncio.run(main())
